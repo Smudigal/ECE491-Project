@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.png
+.DS_Store
+circuit_diagram.txt
+trotter_circuit_diagram.txt
