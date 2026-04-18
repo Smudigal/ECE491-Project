@@ -1,59 +1,35 @@
-"""
-ECE 491 Project 4: ABOVE AND BEYOND
-Running TFIM Trotter Circuits on Noisy Simulators & Real IBM Hardware
+"""Smaller TFIM run for simulator and hardware comparisons."""
 
-This script:
-1. Builds Qiskit quantum circuits for 5-qubit TFIM (shallow enough for hardware)
-2. Compares: exact -> noiseless sim -> noisy sim -> real IBM hardware
-3. Shows where errors come from (Trotter vs shot noise vs gate noise)
-
-SETUP FOR REAL HARDWARE:
-    1. Free account at https://quantum.ibm.com/
-    2. pip install qiskit qiskit-aer qiskit-ibm-runtime
-    3. Replace YOUR_API_TOKEN below
-
-Authors: [Your names here]
-Date: April 2026
-"""
-
-from functools import lru_cache
-from itertools import product
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 
-from qiskit import QuantumCircuit, transpile
+from qiskit import transpile
 from qiskit.exceptions import MissingOptionalLibraryError
-from qiskit.quantum_info import DensityMatrix, Operator, SparsePauliOp
-from qiskit.quantum_info.operators.channel import Kraus
 from qiskit_aer import AerSimulator
+from qiskit_aer.noise import NoiseModel, depolarizing_error
 
-# Import shared functions from main simulation
 from tfim_simulation import (
     build_trotter_circuit_2nd_order,
-    measure_z_expectations,
     build_tfim_hamiltonian,
     create_initial_state,
     exact_evolution,
+    initial_z_values,
+    run_trotter_simulation,
 )
 
 
-# =============================================================================
-# SECTION 1: Shot-based and Noisy Simulation
-# =============================================================================
+# Shot-based helpers
 
 def measure_z_from_counts(counts, n_qubits, n_shots):
-    """
-    Compute <Z_i> from measurement counts (shot-based).
-
-    <Z_i> = P(qubit_i = 0) - P(qubit_i = 1)
-
-    Qiskit bit ordering: bitstring[-1-i] = qubit i
-    """
+    """Compute <Z_i> from measurement counts."""
+    # Convert measured bitstrings into average Z values for each qubit.
     z_values = np.zeros(n_qubits)
     for bitstring, count in counts.items():
         for i in range(n_qubits):
+            # Qiskit stores qubit 0 at the end of the bitstring.
             bit = int(bitstring[-(i + 1)])
             if bit == 0:
                 z_values[i] += count
@@ -62,138 +38,35 @@ def measure_z_from_counts(counts, n_qubits, n_shots):
     return z_values / n_shots
 
 
-def measure_z_expectations_density_matrix(rho, n_qubits):
-    """Compute <Z_i> for each qubit from a density matrix."""
-    z_values = np.zeros(n_qubits)
-    for i in range(n_qubits):
-        pauli_str = ['I'] * n_qubits
-        pauli_str[n_qubits - 1 - i] = 'Z'
-        op = SparsePauliOp(''.join(pauli_str))
-        z_values[i] = np.real(rho.expectation_value(op))
-    return z_values
-
-
-@lru_cache(maxsize=None)
-def single_qubit_depolarizing_channel(error_rate):
-    """Return a 1-qubit depolarizing channel as a Kraus operator."""
-    p = float(error_rate)
-    identity = np.eye(2, dtype=complex)
-    paulis = [
-        np.array([[0, 1], [1, 0]], dtype=complex),
-        np.array([[0, -1j], [1j, 0]], dtype=complex),
-        np.array([[1, 0], [0, -1]], dtype=complex),
-    ]
-    kraus_ops = [np.sqrt(max(0.0, 1.0 - 3.0 * p / 4.0)) * identity]
-    kraus_ops.extend(np.sqrt(p / 4.0) * pauli for pauli in paulis)
-    return Kraus(kraus_ops)
-
-
-@lru_cache(maxsize=None)
-def two_qubit_depolarizing_channel(error_rate):
-    """Return a 2-qubit depolarizing channel as a Kraus operator."""
-    p = float(error_rate)
-    identity = np.eye(2, dtype=complex)
-    paulis = [
-        identity,
-        np.array([[0, 1], [1, 0]], dtype=complex),
-        np.array([[0, -1j], [1j, 0]], dtype=complex),
-        np.array([[1, 0], [0, -1]], dtype=complex),
-    ]
-    pauli_products = [np.kron(a, b) for a, b in product(paulis, repeat=2)]
-
-    kraus_ops = [
-        np.sqrt(max(0.0, 1.0 - 15.0 * p / 16.0)) * pauli_products[0]
-    ]
-    kraus_ops.extend(np.sqrt(p / 16.0) * pauli for pauli in pauli_products[1:])
-    return Kraus(kraus_ops)
-
-
-def simulate_density_matrix_with_depolarizing_noise(
-    qc, single_q_error=0.001, two_q_error=0.01
-):
-    """
-    Simulate a circuit with simple depolarizing noise after each gate.
-
-    This avoids the Aer noise runtime, which can fail on some systems.
-    """
-    rho = DensityMatrix.from_label("0" * qc.num_qubits)
-    one_q_channel = single_qubit_depolarizing_channel(single_q_error)
-    two_q_channel = two_qubit_depolarizing_channel(two_q_error)
-
-    for instruction in qc.data:
-        name = instruction.operation.name
-        qargs = [qubit._index for qubit in instruction.qubits]
-
-        if name == "barrier":
-            continue
-
-        rho = rho.evolve(Operator(instruction.operation), qargs=qargs)
-
-        if len(qargs) == 1:
-            rho = rho.evolve(one_q_channel, qargs=qargs)
-        elif len(qargs) == 2:
-            rho = rho.evolve(two_q_channel, qargs=qargs)
-
-    return rho
-
-
 def run_noisy_simulation(n_qubits, J, h, excited_qubit, times,
                          n_trotter_steps, n_shots=8192,
                          single_q_error=0.001, two_q_error=0.01):
-    """
-    Run Trotter circuits on a noisy simulator mimicking IBM hardware.
+    """Run the circuit on Aer with simple depolarizing noise."""
+    # This gives a quick hardware-like comparison without using a real backend.
+    # Aer already knows how to apply depolarizing noise to standard gates.
+    noise_model = NoiseModel()
+    one_qubit_error = depolarizing_error(single_q_error, 1)
+    two_qubit_error = depolarizing_error(two_q_error, 2)
+    for gate_name in ["x", "rx", "rz"]:
+        noise_model.add_all_qubit_quantum_error(one_qubit_error, gate_name)
+    noise_model.add_all_qubit_quantum_error(two_qubit_error, "cx")
 
-    Uses a density-matrix simulation with depolarizing noise after each
-    single-qubit or two-qubit gate:
-        - single_q_error: error rate for Rx, Rz, X gates
-        - two_q_error: error rate for CNOT gates
-    """
+    backend = AerSimulator(noise_model=noise_model)
     z_expectations = np.zeros((n_qubits, len(times)))
+    start_values = initial_z_values(n_qubits, excited_qubit)
 
     for t_idx, t in enumerate(times):
         if t == 0:
-            z_vals = np.ones(n_qubits)
-            z_vals[excited_qubit] = -1.0
-            z_expectations[:, t_idx] = z_vals
+            z_expectations[:, t_idx] = start_values
             continue
 
+        # Each circuit uses a different dt so that it lands at time t.
         dt = t / n_trotter_steps
         qc = build_trotter_circuit_2nd_order(
-            n_qubits, J, h, dt, n_trotter_steps, excited_qubit)
-        rho = simulate_density_matrix_with_depolarizing_noise(
-            qc,
-            single_q_error=single_q_error,
-            two_q_error=two_q_error,
+            n_qubits, J, h, dt, n_trotter_steps, excited_qubit
         )
-        z_expectations[:, t_idx] = measure_z_expectations_density_matrix(rho, n_qubits)
-
-        if (t_idx + 1) % 5 == 0 or t_idx == len(times) - 1:
-            print(f"    t = {t:.1f}  ({t_idx+1}/{len(times)})")
-
-    return z_expectations
-
-
-def run_noiseless_shot_simulation(n_qubits, J, h, excited_qubit, times,
-                                  n_trotter_steps, n_shots=8192):
-    """
-    Run Trotter circuits on a noiseless simulator with finite shots.
-    Shows the effect of shot noise alone (no gate errors).
-    """
-    backend = AerSimulator()
-    z_expectations = np.zeros((n_qubits, len(times)))
-
-    for t_idx, t in enumerate(times):
-        if t == 0:
-            z_vals = np.ones(n_qubits)
-            z_vals[excited_qubit] = -1.0
-            z_expectations[:, t_idx] = z_vals
-            continue
-
-        dt = t / n_trotter_steps
-        qc = build_trotter_circuit_2nd_order(
-            n_qubits, J, h, dt, n_trotter_steps, excited_qubit)
         qc.measure_all()
-
+        # Transpile first so Aer runs the same gate set the backend expects.
         qc_transpiled = transpile(qc, backend)
         result = backend.run(qc_transpiled, shots=n_shots).result()
         counts = result.get_counts()
@@ -205,40 +78,78 @@ def run_noiseless_shot_simulation(n_qubits, J, h, excited_qubit, times,
     return z_expectations
 
 
-# =============================================================================
-# SECTION 2: Real IBM Quantum Hardware
-# =============================================================================
+# Real hardware
 
 def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
-                         n_trotter_steps, api_token, n_shots=4096):
-    """
-    Run circuits on a real IBM quantum processor.
-
-    Uses 2nd-order Trotter with few steps to keep circuit shallow.
-    """
+                         n_trotter_steps, api_token=None, n_shots=4096,
+                         channel=None, instance=None):
+    """Run the circuits on a real IBM backend."""
+    # Build the measured circuits, send them to IBM, and turn counts into <Z_i>.
     from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
 
-    service = QiskitRuntimeService(channel="ibm_quantum", token=api_token)
+    # Different IBM accounts can use different runtime channels.
+    if api_token:
+        candidate_channels = [channel] if channel else [
+            "ibm_quantum_platform", "ibm_cloud"
+        ]
+        errors = {}
+        service = None
+        for candidate in candidate_channels:
+            try:
+                kwargs = {
+                    "channel": candidate,
+                    "token": api_token,
+                    "instance": instance,
+                }
+                if candidate == "ibm_quantum_platform":
+                    kwargs["region"] = "us-east"
+                    kwargs["plans_preference"] = ["open"]
+                service = QiskitRuntimeService(**kwargs)
+                print(f"  Authenticated with channel: {candidate}")
+                break
+            except Exception as exc:
+                errors[candidate] = f"{type(exc).__name__}: {exc}"
+        if service is None:
+            raise RuntimeError(
+                "Could not authenticate with the provided IBM Quantum token. "
+                f"Tried channels: {errors}"
+            )
+    else:
+        try:
+            service = QiskitRuntimeService(channel=channel, instance=instance)
+            acct = service.active_account() or {}
+            if acct.get("channel"):
+                print(f"  Using saved account on channel: {acct['channel']}")
+        except Exception as exc:
+            raise RuntimeError(
+                "No usable IBM Quantum credentials were found. "
+                "Set QISKIT_IBM_TOKEN or save an account locally."
+            ) from exc
+
+    # Ask IBM for the least busy real device that can fit the circuit.
     backend = service.least_busy(
         simulator=False, min_num_qubits=n_qubits, operational=True)
 
     print(f"  Device: {backend.name} ({backend.num_qubits} qubits)")
 
-    # Build all circuits
     circuits = []
     valid_indices = []
+    start_values = initial_z_values(n_qubits, excited_qubit)
 
     for t_idx, t in enumerate(times):
         if t == 0:
+            # We already know the exact t=0 values.
             continue
         dt = t / n_trotter_steps
         qc = build_trotter_circuit_2nd_order(
-            n_qubits, J, h, dt, n_trotter_steps, excited_qubit)
+            n_qubits, J, h, dt, n_trotter_steps, excited_qubit
+        )
         qc.measure_all()
         circuits.append(qc)
         valid_indices.append(t_idx)
 
     print(f"  Transpiling {len(circuits)} circuits...")
+    # This maps the circuits to the native gates of the selected backend.
     transpiled = transpile(circuits, backend, optimization_level=3)
 
     if transpiled:
@@ -256,10 +167,7 @@ def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
     result = job.result()
 
     z_expectations = np.zeros((n_qubits, len(times)))
-    # t=0
-    z_vals = np.ones(n_qubits)
-    z_vals[excited_qubit] = -1.0
-    z_expectations[:, 0] = z_vals
+    z_expectations[:, 0] = start_values
 
     for i, t_idx in enumerate(valid_indices):
         counts = result[i].data.meas.get_counts()
@@ -269,21 +177,26 @@ def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
     return z_expectations, backend.name
 
 
-# =============================================================================
-# SECTION 3: Plotting
-# =============================================================================
+# Plot helpers
 
 def plot_four_panel(z_exact, z_noiseless, z_noisy, z_hardware,
-                    times, n_qubits, hw_name=None, filename=None):
+                    times, n_qubits, hw_name=None, hardware_note=None,
+                    filename=None):
     """Four-panel heatmap: exact, noiseless, noisy, hardware."""
+    # Put the four result types on one figure so they are easy to compare.
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+    # Matching color limits make the four panels easier to compare.
     norm = TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
 
     datasets = [
         (z_exact, "Exact (matrix exponential)", None),
         (z_noiseless, "Noiseless Simulator", None),
-        (z_noisy, "Noisy Simulator (IBM noise model)", "Enable RUN_NOISY_SIM"),
-        (z_hardware, f"Real Hardware ({hw_name})" if hw_name else "Real Hardware", "Enable RUN_ON_HARDWARE"),
+        (z_noisy, "Noisy Simulator (depolarizing noise)", "Enable RUN_NOISY_SIM"),
+        (
+            z_hardware,
+            f"Real Hardware ({hw_name})" if hw_name else "Real Hardware",
+            hardware_note or "Hardware run was not executed",
+        ),
     ]
 
     for ax, (data, title, missing_hint) in zip(axes.flat, datasets):
@@ -291,14 +204,13 @@ def plot_four_panel(z_exact, z_noiseless, z_noisy, z_hardware,
             im = ax.imshow(data, aspect='auto', origin='lower',
                           extent=[times[0], times[-1], -0.5, n_qubits-0.5],
                           cmap='RdBu_r', norm=norm)
-            ax.set_xlim(times[0], times[-1])
-            ax.set_ylim(-0.5, n_qubits - 0.5)
         else:
-            ax.text(0.5, 0.5, f'Not available\n({missing_hint})',
+            ax.text(0.5, 0.5, missing_hint,
                     transform=ax.transAxes, ha='center', va='center',
                     fontsize=12, color='gray')
-            ax.set_xlim(times[0], times[-1])
-            ax.set_ylim(-0.5, n_qubits - 0.5)
+        # Keep the axes lined up even if one panel has no data.
+        ax.set_xlim(times[0], times[-1])
+        ax.set_ylim(-0.5, n_qubits - 0.5)
         ax.set_title(title, fontsize=12, fontweight='bold')
         ax.set_xlabel('Time', fontsize=10)
         ax.set_ylabel('Qubit index', fontsize=10)
@@ -316,9 +228,11 @@ def plot_four_panel(z_exact, z_noiseless, z_noisy, z_hardware,
 def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_hardware, times,
                       qubit_indices, filename=None):
     """Line plot comparing exact, simulator, noisy, and hardware traces."""
+    # Plot a few qubits directly so differences are easier to see than in a heatmap.
     fig, ax = plt.subplots(figsize=(10, 6))
 
     for qi in qubit_indices:
+        # We reuse the same color per method so the plot stays readable.
         ax.plot(times, z_exact[qi], '-', color='#2b6cb0', linewidth=2, alpha=0.8)
         ax.plot(times, z_noiseless[qi], '-.', color='#6b46c1', linewidth=1.8, alpha=0.8)
         if z_noisy is not None:
@@ -327,7 +241,7 @@ def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_hardware, times,
             ax.plot(times, z_hardware[qi], 'o', color='#1d9e75',
                     markersize=3, alpha=0.6)
 
-    # Custom legend (one entry per method, not per qubit)
+    # Keep the legend by method so it does not get too crowded.
     from matplotlib.lines import Line2D
     legend_lines = [
         Line2D([0], [0], color='#2b6cb0', lw=2, label='Exact'),
@@ -360,25 +274,59 @@ def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_hardware, times,
     plt.close()
 
 
-# =============================================================================
-# SECTION 4: Main
-# =============================================================================
+def save_circuit_diagram(qc, title, filename, fold, scale, figure_size, text_fold):
+    """Save a circuit diagram, or a text version if mpl is missing."""
+    # Save a figure version first, then fall back to text if needed.
+    try:
+        # The mpl drawer makes a cleaner figure for the report.
+        fig = qc.draw(
+            output='mpl',
+            style='iqp',
+            fold=fold,
+            justify='left',
+            plot_barriers=False,
+            idle_wires=False,
+            scale=scale,
+        )
+        fig.set_size_inches(*figure_size)
+        fig.suptitle(title, fontsize=14, y=0.96)
+        if fig.axes:
+            fig.axes[0].set_position([0.03, 0.08, 0.94, 0.74])
+        fig.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"    Saved: {filename}")
+        plt.close(fig)
+    except MissingOptionalLibraryError:
+        # Fall back to text if the optional drawing dependency is not installed.
+        with open('circuit_diagram.txt', 'w', encoding='utf-8') as f:
+            f.write(qc.draw(output='text', fold=text_fold).single_string())
+        print("    Saved: circuit_diagram.txt")
+    except Exception:
+        print("    (Could not save circuit diagram)")
+
 
 if __name__ == "__main__":
 
-    # --- Config ---
+    # Keep this small enough for hardware runs.
     n_qubits = 5
     J = 1.0
     h = 1.0
-    excited_qubit = 2        # Middle of 5 qubits
-    n_trotter_steps = 3      # Keep shallow for hardware!
+    excited_qubit = 2
+    n_trotter_steps = 3
     t_max = 3.0
     n_time_points = 20
     times = np.linspace(0, t_max, n_time_points)
 
-    API_TOKEN = "YOUR_API_TOKEN_HERE"
+    API_TOKEN = os.environ.get("QISKIT_IBM_TOKEN") or os.environ.get("IBM_QUANTUM_TOKEN")
+    API_CHANNEL = os.environ.get("QISKIT_IBM_CHANNEL")
+    API_INSTANCE = os.environ.get("QISKIT_IBM_INSTANCE")
     RUN_NOISY_SIM = True
-    RUN_ON_HARDWARE = False   # Set True when ready
+    RUN_ON_HARDWARE = os.environ.get("RUN_ON_HARDWARE", "").lower() in {
+        "1", "true", "yes", "y"
+    }
+    hardware_note = (
+        "Hardware run skipped in this script\n"
+        "(set RUN_ON_HARDWARE = True or 1)"
+    )
 
     print("=" * 60)
     print("ABOVE AND BEYOND: Hardware Comparison")
@@ -386,7 +334,6 @@ if __name__ == "__main__":
     print(f"  {n_qubits} qubits | {n_trotter_steps} Trotter steps (2nd-order)")
     print(f"  Time: 0 to {t_max} | {n_time_points} points")
 
-    # --- Print circuit stats ---
     dt_sample = t_max / n_trotter_steps
     qc_sample = build_trotter_circuit_2nd_order(
         n_qubits, J, h, dt_sample, n_trotter_steps, excited_qubit)
@@ -397,20 +344,27 @@ if __name__ == "__main__":
     print(f"    Rz:    {ops.get('rz', 0)}")
     print(f"    Rx:    {ops.get('rx', 0)}")
 
-    # Save circuit diagram
-    try:
-        fig = qc_sample.draw(output='mpl', style='iqp', fold=60)
-        fig.savefig('circuit_diagram.png', dpi=300, bbox_inches='tight')
-        print(f"    Saved: circuit_diagram.png")
-        plt.close(fig)
-    except MissingOptionalLibraryError:
-        with open('circuit_diagram.txt', 'w', encoding='utf-8') as f:
-            f.write(qc_sample.draw(output='text', fold=120).single_string())
-        print("    Saved: circuit_diagram.txt")
-    except Exception:
-        print("    (Could not save circuit diagram)")
+    qc_step = build_trotter_circuit_2nd_order(
+        n_qubits, J, h, dt_sample, 1, excited_qubit)
+    save_circuit_diagram(
+        qc_step,
+        f"Representative 2nd-order TFIM Trotter step (repeated {n_trotter_steps}x)",
+        "circuit_step_diagram.png",
+        28,
+        0.85,
+        (13, 4.6),
+        80,
+    )
+    save_circuit_diagram(
+        qc_sample,
+        f"Full 2nd-order TFIM circuit ({n_trotter_steps} Trotter steps)",
+        "circuit_diagram.png",
+        42,
+        0.62,
+        (15, 6.6),
+        110,
+    )
 
-    # --- Step 1: Exact ---
     print("\n" + "-" * 40)
     print("Step 1: Exact solution")
     H_hw = build_tfim_hamiltonian(n_qubits, J, h)
@@ -418,58 +372,56 @@ if __name__ == "__main__":
     z_exact = exact_evolution(H_hw, psi0_hw, times, n_qubits)
     print("  Done.")
 
-    # --- Step 2: Noiseless simulator ---
     print("\nStep 2: Noiseless simulator (statevector)")
-    z_noiseless = np.zeros((n_qubits, len(times)))
-    for t_idx, t in enumerate(times):
-        if t == 0:
-            z_vals = np.ones(n_qubits)
-            z_vals[excited_qubit] = -1.0
-            z_noiseless[:, t_idx] = z_vals
-            continue
-        dt = t / n_trotter_steps
-        qc = build_trotter_circuit_2nd_order(
-            n_qubits, J, h, dt, n_trotter_steps, excited_qubit)
-        z_noiseless[:, t_idx] = measure_z_expectations(qc, n_qubits)
+    z_noiseless = run_trotter_simulation(
+        n_qubits, J, h, excited_qubit, times, n_trotter_steps, order=2
+    )
     print("  Done.")
 
-    # --- Step 3: Noisy simulator ---
     z_noisy = None
     if RUN_NOISY_SIM:
-        print("\nStep 3: Noisy simulator (IBM noise model)")
+        print("\nStep 3: Noisy simulator (depolarizing noise)")
         z_noisy = run_noisy_simulation(
             n_qubits, J, h, excited_qubit, times, n_trotter_steps)
         print("  Done.")
     else:
         print("\nStep 3: Skipped noisy simulator (set RUN_NOISY_SIM = True)")
 
-    # --- Step 4: Real hardware ---
     z_hardware = None
     hw_name = None
 
-    if RUN_ON_HARDWARE and API_TOKEN != "YOUR_API_TOKEN_HERE":
+    if RUN_ON_HARDWARE:
         print("\nStep 4: Real IBM Quantum hardware")
         try:
             z_hardware, hw_name = run_on_real_hardware(
                 n_qubits, J, h, excited_qubit, times,
-                n_trotter_steps, API_TOKEN)
+                n_trotter_steps, api_token=API_TOKEN, channel=API_CHANNEL,
+                instance=API_INSTANCE)
+            hardware_note = None
             print(f"  Done! Device: {hw_name}")
         except Exception as e:
+            hardware_note = f"Hardware run failed\n({e})"
             print(f"  Failed: {e}")
     else:
+        if not API_TOKEN:
+            hardware_note = (
+                "Hardware run skipped\n"
+                "Set QISKIT_IBM_TOKEN or save an account,\n"
+                "then run with RUN_ON_HARDWARE=1"
+            )
         print("\nStep 4: Skipped (set RUN_ON_HARDWARE = True)")
 
-    # --- Step 5: Plots ---
     print("\n" + "-" * 40)
     print("Generating plots...")
 
-    plot_four_panel(z_exact, z_noiseless, z_noisy, z_hardware,
-                    times, n_qubits, hw_name, 'hardware_comparison.png')
+    plot_four_panel(
+        z_exact, z_noiseless, z_noisy, z_hardware,
+        times, n_qubits, hw_name, hardware_note, 'hardware_comparison.png'
+    )
 
     plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_hardware, times,
                       [1, 2, 3], 'hardware_traces.png')
 
-    # --- Summary ---
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
