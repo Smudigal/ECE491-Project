@@ -1,5 +1,3 @@
-"""Main TFIM simulation code."""
-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
@@ -13,7 +11,6 @@ from qiskit.quantum_info import Statevector, SparsePauliOp
 # Build the t = 0 spin pattern from the project setup.
 # This lets us fill in the starting point without running a circuit.
 def initial_z_values(n_qubits, excited_qubit):
-    """Return the <Z_i> values at time t = 0."""
     # Start with every site in the +1 Z state.
     # Then flip the chosen excited site to -1.
     z_values = np.ones(n_qubits)
@@ -24,7 +21,6 @@ def initial_z_values(n_qubits, excited_qubit):
 # Add one ZZ layer across the open chain.
 # We just walk left to right and give every neighbor pair the same block.
 def add_zz_layer(qc, n_qubits, rz_angle):
-    """Add one nearest-neighbor ZZ layer using CX-Rz-CX blocks."""
     # Walk down the open chain one neighbor pair at a time.
     # Each CX-Rz-CX block implements one ZZ interaction.
     for i in range(n_qubits - 1):
@@ -36,7 +32,6 @@ def add_zz_layer(qc, n_qubits, rz_angle):
 # Add the transverse-field piece of the TFIM step.
 # Every qubit feels the same field, so every qubit gets the same rotation.
 def add_x_layer(qc, n_qubits, rx_angle):
-    """Add one transverse-field X layer."""
     # Apply the same transverse-field rotation to each qubit.
     # This is the X part of the TFIM Hamiltonian.
     for i in range(n_qubits):
@@ -46,7 +41,6 @@ def add_x_layer(qc, n_qubits, rx_angle):
 # Build one Pauli string in the order Qiskit expects.
 # Any qubit we do not touch just stays as an identity.
 def build_pauli_string(n_qubits, qubit_terms):
-    """Build a Pauli string in Qiskit's qubit order."""
     # Start from all identities so untouched qubits stay neutral.
     # Then place the requested letters using Qiskit's right-to-left ordering.
     pauli_chars = ["I"] * n_qubits
@@ -60,7 +54,6 @@ def build_pauli_string(n_qubits, qubit_terms):
 # Build the first-order Trotter circuit for one time value.
 # One Trotter step here means ZZ first and then X.
 def build_trotter_circuit_1st_order(n_qubits, J, h, dt, n_steps, excited_qubit):
-    """Build the 1st-order Trotter circuit."""
     # Build the circuit from the chosen excited basis state.
     # Each Trotter step applies ZZ first and then X.
     qc = QuantumCircuit(n_qubits)
@@ -80,7 +73,6 @@ def build_trotter_circuit_1st_order(n_qubits, J, h, dt, n_steps, excited_qubit):
 # Build the second-order Trotter circuit for one time value.
 # This is the symmetric half-ZZ, full-X, half-ZZ version.
 def build_trotter_circuit_2nd_order(n_qubits, J, h, dt, n_steps, excited_qubit):
-    """Build the 2nd-order Trotter circuit."""
     # Build the same starting state as the 1st-order circuit.
     # Each step uses half-ZZ, full-X, half-ZZ for better accuracy.
     qc = QuantumCircuit(n_qubits)
@@ -102,7 +94,6 @@ def build_trotter_circuit_2nd_order(n_qubits, J, h, dt, n_steps, excited_qubit):
 # Choose which Trotter builder to call.
 # Keeping the order switch here makes the rest of the code cleaner.
 def build_trotter_circuit(n_qubits, J, h, dt, n_steps, excited_qubit, order=1):
-    """Pick either the 1st-order or 2nd-order Trotter circuit."""
     # Keep the order switch in one small place.
     # That way the rest of the code can call one function.
     if order == 2:
@@ -120,7 +111,6 @@ def build_trotter_circuit(n_qubits, J, h, dt, n_steps, excited_qubit, order=1):
 # The final output is one <Z_i> curve for each qubit.
 def run_trotter_simulation(n_qubits, J, h, excited_qubit, times,
                            n_trotter_steps, order=1):
-    """Run Trotterized TFIM using Qiskit circuits for each time point."""
     # Store one Z trace per qubit for every requested time.
     # For each time, build the circuit and read expectations from the statevector.
     z_expectations = np.zeros((n_qubits, len(times)))
@@ -155,7 +145,6 @@ def run_trotter_simulation(n_qubits, J, h, excited_qubit, times,
 # Build the TFIM Hamiltonian for the open 1D chain.
 # This is the matrix version of the same physics the circuit is approximating.
 def build_tfim_hamiltonian(n_qubits, J, h):
-    """Build the TFIM Hamiltonian matrix."""
     # Add up the open-chain ZZ couplings first.
     # Then add the single-qubit X-field terms and convert to a matrix.
     pauli_terms = []
@@ -174,7 +163,6 @@ def build_tfim_hamiltonian(n_qubits, J, h):
 # Build the starting basis state with one flipped qubit.
 # This matches the exact 11-qubit setup from the project writeup.
 def create_initial_state(n_qubits, excited_qubit):
-    """Create the basis state with one flipped qubit."""
     # Make one basis vector for the chosen starting spin pattern.
     # Only the selected excited site is flipped to |1>.
     dim = 2**n_qubits
@@ -187,7 +175,6 @@ def create_initial_state(n_qubits, excited_qubit):
 # Evolve the state exactly by diagonalizing the Hamiltonian once.
 # This is our benchmark when we judge the Trotter circuits.
 def exact_evolution(H, psi0, times, n_qubits):
-    """Exact time evolution using one Hamiltonian diagonalization."""
     # Diagonalize the Hamiltonian once and reuse it for every time value.
     # This gives the exact benchmark used to judge the Trotter circuits.
     times = np.asarray(times, dtype=float)
@@ -226,7 +213,6 @@ def exact_evolution(H, psi0, times, n_qubits):
 # This is the cleanest way to answer how many steps we need.
 def run_error_analysis(n_qubits, J, h, excited_qubit, test_time,
                        step_counts, H_matrix, psi0):
-    """Compute Trotter infidelity for both orders."""
     # Compare the Trotter states to the exact state at one fixed time.
     # Smaller infidelity means the approximation is doing better.
     eigenvalues, eigenvectors = np.linalg.eigh(H_matrix)
@@ -263,7 +249,6 @@ def run_error_analysis(n_qubits, J, h, excited_qubit, test_time,
 # This is optional appendix material, not one of the main required figures.
 def compute_infidelity_vs_time(n_qubits, J, h, excited_qubit, times,
                                n_trotter_steps, H_matrix, psi0, order=1):
-    """Compute state infidelity across time for one Trotter setting."""
     # Compare each Trotter state to the exact state at the same time.
     # This separates the 1st- and 2nd-order methods more clearly than <Z_i> alone.
     eigenvalues, eigenvectors = np.linalg.eigh(H_matrix)
@@ -293,7 +278,6 @@ def compute_infidelity_vs_time(n_qubits, J, h, excited_qubit, times,
 # Apply the same simple styling to every plot.
 # This keeps the figures consistent without much repeated code.
 def _style_axes(ax):
-    """Keep the plots simple and readable."""
     # Use one small styling helper so every figure reads the same way.
     # This keeps the plots clean without repeating formatting code.
     ax.set_facecolor('white')
@@ -399,7 +383,6 @@ def plot_error_scaling(step_counts, errors_1st, errors_2nd, test_time, filename=
 # Plot the state error over time for one Trotter order.
 # This is mainly helpful as a backup figure if we want extra detail.
 def plot_state_error_vs_time(times, error_curves, title, filename=None):
-    """Plot state infidelity across time."""
     fig, ax = plt.subplots(figsize=(9.5, 5.6), constrained_layout=True)
 
     for values, label, color, linestyle in error_curves:

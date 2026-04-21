@@ -1,5 +1,3 @@
-"""Smaller TFIM run for simulator and hardware comparisons."""
-
 import os
 from pathlib import Path
 
@@ -27,7 +25,6 @@ from tfim_simulation import (
 # Turn raw shot counts into one <Z_i> value per qubit.
 # This is how we turn hardware-style bitstrings back into physics data.
 def measure_z_from_counts(counts, n_qubits, n_shots):
-    """Compute <Z_i> from measurement counts."""
     # Walk through each measured bitstring and tally each qubit separately.
     # Mapping 0 to +1 and 1 to -1 turns the shot average into <Z_i>.
     z_values = np.zeros(n_qubits)
@@ -48,7 +45,6 @@ def run_noisy_simulation(n_qubits, J, h, excited_qubit, times,
                          n_trotter_steps, n_shots=8192,
                          single_q_error=0.001, two_q_error=0.01,
                          noise_scale=1.0):
-    """Run the circuit on Aer with simple depolarizing noise."""
     # Build the same circuit as before, but run it through a simple Aer noise model.
     # The scaled error rates let this function support both noisy runs and ZNE.
     noise_model = NoiseModel()
@@ -93,7 +89,6 @@ def run_zne_simulation(n_qubits, J, h, excited_qubit, times,
                        n_trotter_steps, n_shots=8192,
                        single_q_error=0.001, two_q_error=0.01,
                        noise_scales=(1.0, 2.0, 3.0)):
-    """Estimate zero-noise results by extrapolating scaled noisy runs."""
     # Run the noisy simulator at a few stronger noise levels.
     # Then linearly extrapolate those results back to the zero-noise limit.
     scaled_runs = []
@@ -134,7 +129,6 @@ def run_zne_simulation(n_qubits, J, h, excited_qubit, times,
 def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
                          n_trotter_steps, api_token=None, n_shots=4096,
                          instance=None, save_transpiled_diagram=False):
-    """Run the circuits on a real IBM backend."""
     # Send the measured circuits to IBM Runtime and collect the returned counts.
     # This keeps the real-device path simple and close to the simulator flow.
     from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
@@ -259,7 +253,6 @@ def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
 def plot_comparison_panels(z_exact, z_noiseless, z_noisy, z_zne, z_hardware,
                            times, n_qubits, hw_name=None, hardware_note=None,
                            error_summary=None, filename=None):
-    """Heatmaps for exact, noisy, mitigated, and hardware results."""
     # Put the exact, noisy, mitigated, and hardware views in one place.
     # That makes the mitigation story easy to explain on one slide.
     if error_summary is None:
@@ -383,7 +376,6 @@ def plot_comparison_panels(z_exact, z_noiseless, z_noisy, z_zne, z_hardware,
 # This helps when the differences are too subtle in the color plots.
 def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_zne, z_hardware, times,
                       qubit_indices, filename=None):
-    """Line plot comparing exact, noisy, mitigated, and hardware traces."""
     # Plot a few representative qubits as line traces instead of heatmaps.
     # This makes smaller differences between methods easier to point out.
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -440,7 +432,6 @@ def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_zne, z_hardware, times,
 # Save a clean circuit figure when the optional drawer is available.
 # If that drawer is missing, save a plain-text version instead.
 def save_circuit_diagram(qc, title, filename, fold, scale, figure_size, text_fold):
-    """Save a circuit diagram, or a text version if mpl is missing."""
     # Try the matplotlib drawer first for a cleaner figure.
     # If that optional drawer is missing, fall back to a plain-text circuit.
     try:
