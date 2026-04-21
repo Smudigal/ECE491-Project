@@ -469,7 +469,7 @@ if __name__ == "__main__":
     h = 1.0
     excited_qubit = 2
     n_trotter_steps = 3
-    t_max = 3.0
+    t_max = 5.0
     n_time_points = 20
     times = np.linspace(0, t_max, n_time_points)
 
