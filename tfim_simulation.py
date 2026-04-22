@@ -464,8 +464,8 @@ if __name__ == "__main__":
     n_time_points = 100
     times = np.linspace(0, t_max, n_time_points)
     # These extra figures are nice for exploration, but they are not needed by default.
-    SAVE_TROTTER_HEATMAPS = False
-    SAVE_EXTRA_COMPARISON_PLOTS = False
+    SAVE_TROTTER_HEATMAPS = True
+    SAVE_EXTRA_COMPARISON_PLOTS = True
     SAVE_STATE_ERROR_PLOTS = True
     SAVE_PARAMETER_REGIME_PLOT = True
 
