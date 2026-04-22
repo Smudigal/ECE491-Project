@@ -8,8 +8,7 @@ from qiskit.quantum_info import Statevector, SparsePauliOp
 
 # Small helpers
 
-# Build the t = 0 spin pattern from the project setup.
-# This lets us fill in the starting point without running a circuit.
+Created this function so it can apply a ZZ intercation layer across the qubit chain by adding a CNOT-RZ-CONT Block to every neighboring pair
 def initial_z_values(n_qubits, excited_qubit):
     # Start with every site in the +1 Z state.
     # Then flip the chosen excited site to -1.
@@ -18,8 +17,7 @@ def initial_z_values(n_qubits, excited_qubit):
     return z_values
 
 
-# Add one ZZ layer across the open chain.
-# We just walk left to right and give every neighbor pair the same block.
+#Then this function Z creates a interaction layer by running a CNOT–Rz–CNOT block on every neighboring qubit pair.
 def add_zz_layer(qc, n_qubits, rz_angle):
     # Walk down the open chain one neighbor pair at a time.
     # Each CX-Rz-CX block implements one ZZ interaction.
@@ -29,8 +27,7 @@ def add_zz_layer(qc, n_qubits, rz_angle):
         qc.cx(i, i + 1)
 
 
-# Add the transverse-field piece of the TFIM step.
-# Every qubit feels the same field, so every qubit gets the same rotation.
+#Now we need to Apply an X rotation layer by rotating every qubit with the same Rx
 def add_x_layer(qc, n_qubits, rx_angle):
     # Apply the same transverse-field rotation to each qubit.
     # This is the X part of the TFIM Hamiltonian.
@@ -38,8 +35,7 @@ def add_x_layer(qc, n_qubits, rx_angle):
         qc.rx(rx_angle, i)
 
 
-# Build one Pauli string in the order Qiskit expects.
-# Any qubit we do not touch just stays as an identity.
+# This Functino Builds a Pauli string (like "IZXI") by placing specified operators on chosen qubits and using identity for the rest.
 def build_pauli_string(n_qubits, qubit_terms):
     # Start from all identities so untouched qubits stay neutral.
     # Then place the requested letters using Qiskit's right-to-left ordering.
@@ -49,7 +45,7 @@ def build_pauli_string(n_qubits, qubit_terms):
     return "".join(pauli_chars)
 
 
-# Trotter circuits
+# Trotter circuits Section 
 
 # Build the first-order Trotter circuit for one time value.
 # One Trotter step here means ZZ first and then X.
@@ -70,11 +66,8 @@ def build_trotter_circuit_1st_order(n_qubits, J, h, dt, n_steps, excited_qubit):
     return qc
 
 
-# Build the second-order Trotter circuit for one time value.
-# This is the symmetric half-ZZ, full-X, half-ZZ version.
+#This function Builds the second-order Trotter circuit by starting from the excited qubit state and repeating a symmetric ZZ → X → ZZ sequence for each time step
 def build_trotter_circuit_2nd_order(n_qubits, J, h, dt, n_steps, excited_qubit):
-    # Build the same starting state as the 1st-order circuit.
-    # Each step uses half-ZZ, full-X, half-ZZ for better accuracy.
     qc = QuantumCircuit(n_qubits)
     # Start from the same one-spin excitation as the 1st-order circuit.
     qc.x(excited_qubit)
@@ -91,8 +84,7 @@ def build_trotter_circuit_2nd_order(n_qubits, J, h, dt, n_steps, excited_qubit):
     return qc
 
 
-# Choose which Trotter builder to call.
-# Keeping the order switch here makes the rest of the code cleaner.
+# Choose which Trotter builder to call Based on the order parameter
 def build_trotter_circuit(n_qubits, J, h, dt, n_steps, excited_qubit, order=1):
     # Keep the order switch in one small place.
     # That way the rest of the code can call one function.
@@ -112,7 +104,6 @@ def build_trotter_circuit(n_qubits, J, h, dt, n_steps, excited_qubit, order=1):
 def run_trotter_simulation(n_qubits, J, h, excited_qubit, times,
                            n_trotter_steps, order=1):
     # Store one Z trace per qubit for every requested time.
-    # For each time, build the circuit and read expectations from the statevector.
     z_expectations = np.zeros((n_qubits, len(times)))
     z_ops = []
     for i in range(n_qubits):
@@ -173,7 +164,7 @@ def create_initial_state(n_qubits, excited_qubit):
 
 
 # Evolve the state exactly by diagonalizing the Hamiltonian once.
-# This is our benchmark when we judge the Trotter circuits.
+# This is our comparison when we judge the other Trotter circuits.
 def exact_evolution(H, psi0, times, n_qubits):
     # Diagonalize the Hamiltonian once and reuse it for every time value.
     # This gives the exact benchmark used to judge the Trotter circuits.
