@@ -1,6 +1,14 @@
 __pycache__/
 *.py[cod]
 *.png
+!comparison_1st_50.png
+!comparison_2nd_50.png
+!transpiled_hardware_circuit.png
+!trotter_1st_10.png
+!trotter_1st_50.png
+!trotter_2nd_10.png
+!trotter_2nd_50.png
+!trotter_state_error_vs_time.png
 .DS_Store
 circuit_diagram.txt
 trotter_circuit_diagram.txt
