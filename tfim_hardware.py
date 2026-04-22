@@ -23,7 +23,7 @@ from tfim_simulation import (
 # Shot-based helpers
 
 # Turn raw shot counts into one <Z_i> value per qubit.
-# This is how we turn hardware-style bitstrings back into physics data.
+# Turn the measured bitstrings into something we can interpret
 def measure_z_from_counts(counts, n_qubits, n_shots):
     # Walk through each measured bitstring and tally each qubit separately.
     # Mapping 0 to +1 and 1 to -1 turns the shot average into <Z_i>.
@@ -40,13 +40,13 @@ def measure_z_from_counts(counts, n_qubits, n_shots):
 
 
 # Run the TFIM circuit on Aer with a simple depolarizing noise model.
-# This gives us a hardware-like baseline without leaving the simulator.
+# Gives a quick hardware-like reference without using real hardware.
 def run_noisy_simulation(n_qubits, J, h, excited_qubit, times,
                          n_trotter_steps, n_shots=8192,
                          single_q_error=0.001, two_q_error=0.01,
                          noise_scale=1.0):
     # Build the same circuit as before, but run it through a simple Aer noise model.
-    # The scaled error rates let this function support both noisy runs and ZNE.
+    # Error rates are scaled here to support both noisy simulations and ZNE.
     noise_model = NoiseModel()
     # Scaling the error rates is what lets the same function support ZNE.
     scaled_single_q_error = min(noise_scale * single_q_error, 0.999)
@@ -84,7 +84,7 @@ def run_noisy_simulation(n_qubits, J, h, excited_qubit, times,
 
 
 # Estimate a zero-noise answer from several noisier simulator runs.
-# This is error mitigation, not full quantum error correction.
+# This helps reduce noise, but it's not full quantum error correction.
 def run_zne_simulation(n_qubits, J, h, excited_qubit, times,
                        n_trotter_steps, n_shots=8192,
                        single_q_error=0.001, two_q_error=0.01,
@@ -124,17 +124,14 @@ def run_zne_simulation(n_qubits, J, h, excited_qubit, times,
 
 # Real hardware
 
-# Submit the measured TFIM circuits to a real IBM backend.
-# The goal is to keep the real-device path as close as possible to the simulator path.
+This part of the code we are sending the measured TFIM circuits to the real IBM backend
 def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
                          n_trotter_steps, api_token=None, n_shots=4096,
                          instance=None, save_transpiled_diagram=False):
     # Send the measured circuits to IBM Runtime and collect the returned counts.
-    # This keeps the real-device path simple and close to the simulator flow.
     from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
 
-    # Try the most likely runtime channels first, but keep the exact IBM errors.
-    # That way a bad token is easier to debug than with one generic failure line.
+    # This part of code was created to make sure that we could keep IBM's reall errors for debugging
     candidate_channels = []
     if instance:
         candidate_channels.append("ibm_cloud")
@@ -195,6 +192,7 @@ def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
     valid_indices = []
     start_values = initial_z_values(n_qubits, excited_qubit)
 
+    # Here we are Preparing each circuit for real hardware by adding measuremnets to it, stoer it and keep track of where it is coming from           
     for t_idx, t in enumerate(times):
         # We already know the t = 0 answer from the starting bitstring.
         if t == 0:
@@ -203,7 +201,7 @@ def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
         qc = build_trotter_circuit_2nd_order(
             n_qubits, J, h, dt, n_trotter_steps, excited_qubit
         )
-        # Real hardware only gives counts back, so every circuit must be measured.
+        
         qc.measure_all()
         circuits.append(qc)
         valid_indices.append(t_idx)
@@ -212,8 +210,10 @@ def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
     transpiled = transpile(circuits, backend, optimization_level=3)
 
     if transpiled:
-        print(f"  Depth (first circuit): {transpiled[0].depth()}")
-        print(f"  Depth (last circuit):  {transpiled[-1].depth()}")
+        first_depth = transpiled[0].depth()
+        last_depth = transpiled[-1].depth()
+
+        print(f"  Circuit depth → first: {first_depth}, last: {last_depth}")
         ops = transpiled[0].count_ops()
         print(f"  CNOTs (first circuit): {ops.get('cx', 0)}")
         if save_transpiled_diagram:
@@ -249,12 +249,11 @@ def run_on_real_hardware(n_qubits, J, h, excited_qubit, times,
 # Plot helpers
 
 # Show the exact, noisy, mitigated, and hardware heatmaps together.
-# The extra panel is used for a short error summary so the figure tells the whole story.
+#  the last panel summarizes the errors so everything is easy to compare.
 def plot_comparison_panels(z_exact, z_noiseless, z_noisy, z_zne, z_hardware,
                            times, n_qubits, hw_name=None, hardware_note=None,
                            error_summary=None, filename=None):
-    # Put the exact, noisy, mitigated, and hardware views in one place.
-    # That makes the mitigation story easy to explain on one slide.
+    # That makes the mitigation story easy to explain for the presentation
     if error_summary is None:
         error_summary = {}
 
@@ -296,6 +295,7 @@ def plot_comparison_panels(z_exact, z_noiseless, z_noisy, z_zne, z_hardware,
     summary_ax.axis('off')
     summary_ax.set_title("Error Summary", fontsize=12, fontweight='bold')
 
+    # Found best colors so that it would be easy to see on the maps and very visual
     method_colors = {
         "Noiseless": "#6b46c1",
         "Noisy": "#e24b4a",
@@ -312,7 +312,7 @@ def plot_comparison_panels(z_exact, z_noiseless, z_noisy, z_zne, z_hardware,
             labels.append(method_name)
             values.append(error_summary[method_name])
             colors.append(method_colors[method_name])
-
+# We looked into how to create small bar charts inside main plots 
     bars_ax = summary_ax.inset_axes([0.10, 0.44, 0.82, 0.44])
     bar_positions = np.arange(len(labels))
     bars_ax.barh(bar_positions, values, color=colors, alpha=0.88, height=0.6)
@@ -324,6 +324,7 @@ def plot_comparison_panels(z_exact, z_noiseless, z_noisy, z_zne, z_hardware,
     bars_ax.spines['top'].set_visible(False)
     bars_ax.spines['right'].set_visible(False)
 
+   #This code is very important in making the plots be more readable making sure that we scale the ax axis and numbers fit on the bars                            
     if values:
         max_value = max(values)
         bars_ax.set_xlim(0.0, max_value * 1.30)
@@ -372,14 +373,14 @@ def plot_comparison_panels(z_exact, z_noiseless, z_noisy, z_zne, z_hardware,
     plt.close()
 
 
-# Plot a few qubits directly as lines instead of full heatmaps.
+# This code helps plot a few qubits over time as a line graph and comparing methods that we used in the main Hardware comparison.png
 # This helps when the differences are too subtle in the color plots.
 def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_zne, z_hardware, times,
                       qubit_indices, filename=None):
     # Plot a few representative qubits as line traces instead of heatmaps.
     # This makes smaller differences between methods easier to point out.
     fig, ax = plt.subplots(figsize=(10, 6))
-
+    
     for qi in qubit_indices:
         ax.plot(times, z_exact[qi], '-', color='#2b6cb0', linewidth=2, alpha=0.8)
         ax.plot(times, z_noiseless[qi], '-.', color='#6b46c1', linewidth=1.8, alpha=0.8)
@@ -408,7 +409,7 @@ def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_zne, z_hardware, times,
         legend_lines.append(
             Line2D([0], [0], color='#1d9e75', marker='o', lw=0, ms=5,
                    label='Real hardware'))
-
+#Making sure that everyting looks good labeling and fixing dimensions 
     ax.set_xlabel('Time', fontsize=12)
     ax.set_ylabel(r'$\langle Z_i \rangle$', fontsize=12)
     title_parts = ['Exact', 'Noiseless']
@@ -428,11 +429,9 @@ def plot_qubit_traces(z_exact, z_noiseless, z_noisy, z_zne, z_hardware, times,
         print(f"    Saved: {filename}")
     plt.close()
 
-
-# Save a clean circuit figure when the optional drawer is available.
-# If that drawer is missing, save a plain-text version instead.
+# This code was built to save the circuit figure and fallback to a text version if that doesnt work 
 def save_circuit_diagram(qc, title, filename, fold, scale, figure_size, text_fold):
-    # Try the matplotlib drawer first for a cleaner figure.
+    #  We try with a matplotlib drawer first for a cleaner figure.
     # If that optional drawer is missing, fall back to a plain-text circuit.
     try:
         fig = qc.draw(
@@ -463,7 +462,7 @@ def save_circuit_diagram(qc, title, filename, fold, scale, figure_size, text_fol
 
 if __name__ == "__main__":
 
-    # Keep this small enough for hardware runs.
+    # We need to keep this small enough for hardware runs.
     n_qubits = 5
     J = 1.0
     h = 1.0
@@ -497,6 +496,7 @@ if __name__ == "__main__":
     )
 
     print("=" * 60)
+    # We are printing the Circuit Stats like Depth and number of gates
     print("ABOVE AND BEYOND: Hardware Comparison")
     print("=" * 60)
     print(f"  {n_qubits} qubits | {n_trotter_steps} Trotter steps (2nd-order)")
@@ -538,17 +538,20 @@ if __name__ == "__main__":
     print("Step 1: Exact solution")
     H_hw = build_tfim_hamiltonian(n_qubits, J, h)
     psi0_hw = create_initial_state(n_qubits, excited_qubit)
+    #This is the closes to what the answer should be 
     z_exact = exact_evolution(H_hw, psi0_hw, times, n_qubits)
     print("  Done.")
 
     print("\nStep 2: Noiseless simulator (statevector)")
+    # We want to run the ideal quantum circuit wihtout any noise
     z_noiseless = run_trotter_simulation(
         n_qubits, J, h, excited_qubit, times, n_trotter_steps, order=2
     )
     print("  Done.")
 
-    z_noisy = None
+    z_noisy = None # Intializing Hardware results
     z_zne = None
+    # This part we wanted to find out the noisy simulation 
     if RUN_ZNE_SIM:
         print("\nStep 3: Noisy simulator + zero-noise extrapolation")
         z_zne, scaled_runs = run_zne_simulation(
@@ -573,7 +576,7 @@ if __name__ == "__main__":
     z_hardware = None
     hw_name = None
 
-    if RUN_ON_HARDWARE:
+    if RUN_ON_HARDWARE: # Running on the actual quantum hardware
         print("\nStep 4: Real IBM Quantum hardware")
         try:
             z_hardware, hw_name = run_on_real_hardware(
